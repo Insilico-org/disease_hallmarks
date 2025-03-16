@@ -1,0 +1,146 @@
+Gene	Target family	Hallmark of aging
+AAK1	Protein kinase	Altered intercellular communications
+ABL1	Tyrosine kinase	Genomic instability
+ADAM17	Peptidase	Altered intercellular communications
+ADAMTS14	Peptidase	Extracellular matrix stiffness
+AKT1	AGC kinase	Altered intercellular communications, Cellular senescence, Deregulated nutrient signaling, Epigenetic shift, Extracellular matrix stiffness, Genomic instability, Impaired proteostasis, Inflammation, Mitochondrial dysfunction, Retrotranspositions, Stem cell exhaustion, Telomere attrition
+AR	Nuclear receptor	Cellular senescence, Inflammation
+ARL2	Hydrolase 	Mitochondrial dysfunction
+ATAD3B	Hydrolase	Mitochondrial dysfunction
+BLK	Tyrosine kinase	Deregulated nutrient signaling
+BMP2	Growth factor	Stem cell exhaustion
+BRCC3	Peptidase	Inflammation, Retrotranspositions
+CASP1	Peptidase	Genomic instability, Inflammation
+CASP3	Peptidase	Extracellular matrix stiffness, Genomic instability, Inflammation
+CASP8	Peptidase	Genomic instability, Inflammation, Retrotranspositions
+CAT	Oxidoreductase	Genomic instability
+CD36	Scavenger receptor	Deregulated nutrient signaling, Inflammation
+CDC34	Receptor 	Impaired proteostasis
+CHD9	Hydrolase 	Altered intercellular communications
+CHUK	Protein kinase	Cellular senescence, Extracellular matrix stiffness, Genomic instability
+CLEC5A	Scavenger receptor	Inflammation, Retrotranspositions
+CNOT6L	Esterase	Cellular senescence, Genomic instability
+CSNK1A1	Protein kinase 	Genomic instability, Inflammation
+CXCL12	Chemokine	Inflammation, Stem cell exhaustion
+CXCR4	GPCR	Inflammation, Retrotranspositions, Stem cell exhaustion
+DDX17	Hydrolase	Inflammation, Retrotranspositions
+DDX21	Hydrolase 	Telomere attrition
+DNMT1	Methyltransferase	Epigenetic shift, Extracellular matrix stiffness, Genomic instability, Inflammation, Retrotranspositions, Stem cell exhaustion, Telomere attrition
+DUSP3	Esterase	Cellular senescence, Genomic instability
+EGFR	Receptor kinase	Cellular senescence, Deregulated nutrient signaling, Extracellular matrix stiffness, Genomic instability, Impaired proteostasis, Inflammation
+EGLN1	Oxidoreductase	Altered intercellular communications, Cellular senescence, Inflammation, Stem cell exhaustion
+EP300	Acyltransferase	Cellular senescence, Genomic instability, Epigenetic shift, Stem cell exhaustion
+ESR1	Nuclear receptor	Genomic instability
+EZH2	Methyltransferase	Cellular senescence, Epigenetic shift, Inflammation
+FAM20C	Protein kinase 	Extracellular matrix stiffness
+FGF2	Growth factor	Deregulated nutrient signaling, Extracellular matrix stiffness, Stem cell exhaustion
+FZD8	GPCR	Altered intercellular communications
+GAK	Protein kinase	Impaired proteostasis, Mitochondrial dysfunction
+GALNT1	Glycosyltransferase	Extracellular matrix stiffness
+GSK3B	CMGC kinase	Altered intercellular communications, Stem cell exhaustion
+HCK	Tyrosine kinase	Inflammation, Retrotranspositions
+HDAC1	Hydrolase	Epigenetic shift, Genomic instability
+HDAC6	Hydrolase	Cellular senescence
+HDAC9	Hydrolase	Epigenetic shift
+HGF	Growth factor	Altered intercellular communications, Cellular senescence, Deregulated nutrient signaling, Extracellular matrix stiffness, Genomic instability, Impaired proteostasis, Inflammation, Mitochondrial dysfunction, Stem cell exhaustion
+HSPA5	Hydrolase	Impaired proteostasis, Mitochondrial dysfunction
+IGF1	Growth factor	Altered intercellular communications, Cellular senescence, Deregulated nutrient signaling, Epigenetic shift, Extracellular matrix stiffness, Genomic instability, Impaired proteostasis, Inflammation, Mitochondrial dysfunction, Retrotranspositions, Stem cell exhaustion, Telomere attrition
+IGF1R	Receptor kinase	Deregulated nutrient signaling, Genomic instability, Inflammation, Mitochondrial dysfunction, Retrotranspositions, Stem cell exhaustion
+IGF2	Growth factor	Deregulated nutrient signaling, Stem cell exhaustion
+IKBKB	Protein kinase	Cellular senescence, Impaired proteostasis, Inflammation, Genomic instability, Stem cell exhaustion
+IL1B	Interleukin	Genomic instability, Inflammation, Mitochondrial dysfunction, Retrotranspositions, Stem cell exhaustion, Telomere attrition
+IL6	Interleukin	Altered intercellular communications, Cellular senescence, Deregulated nutrient signaling, Impaired proteostasis, Inflammation, Mitochondrial dysfunction, Stem cell exhaustion
+IMPDH2	Oxidoreductase	Altered intercellular communications, Deregulated nutrient signaling
+INSR	Receptor kinase	Deregulated nutrient signaling
+ITGA11	Receptor	Extracellular matrix stiffness
+ITGAM	Receptor	Inflammation
+ITGAV	Receptor	Altered intercellular communications, Deregulated nutrient signaling, Extracellular matrix stiffness
+ITGB2	Receptor	Mitochondrial dysfunction
+ITGB5	Receptor	Altered intercellular communications, Extracellular matrix stiffness
+ITK	Tyrosine kinase	Inflammation
+JAK1	Tyrosine kinase	Inflammation
+JAK2	Tyrosine kinase	Altered intercellular communications, Cellular senescence, Genomic instability, Inflammation
+KAT6A	Acyltransferase	Cellular senescence, Epigenetic shift, Stem cell exhaustion
+KAT8	Acyltransferase	Epigenetic shift
+KDM7A	Oxidoreductase	Altered intercellular communications, Epigenetic shift
+KDR	Receptor kinase	Deregulated nutrient signaling, Genomic instability, Inflammation
+KIT	Receptor kinase	Deregulated nutrient signaling
+LOX	Oxidoreductase	Extracellular matrix stiffness, Inflammation
+LPIN2	Esterase	Inflammation, Retrotranspositions
+LYN	Tyrosine kinase	Inflammation, Retrotranspositions
+MAPK1	CMGC kinase	Impaired proteostasis, Inflammation
+MAPK14	CMGC kinase	Impaired proteostasis, Stem cell exhaustion
+MAPK8	CMGC kinase	Genomic instability
+MIB2	Acyltransferase	Altered intercellular communications
+MMP1	Peptidase	Altered intercellular communications, Cellular senescence, Extracellular matrix stiffness
+MMP2	Peptidase	Extracellular matrix stiffness, Inflammation
+MMP25	Peptidase	Extracellular matrix stiffness
+MMP7	Peptidase	Extracellular matrix stiffness
+MMP9	Peptidase	Extracellular matrix stiffness, Genomic instability
+MTHFD2	Oxidoreductase	Mitochondrial dysfunction
+MTMR4	Esterase	Altered intercellular communications
+MTOR	Protein kinase	Altered intercellular communications, Cellular senescence, Deregulated nutrient signaling, Epigenetic shift, Extracellular matrix stiffness, Genomic instability, Impaired proteostasis, Inflammation, Mitochondrial dysfunction, Retrotranspositions, Stem cell exhaustion, Telomere attrition
+MYO1C	Hydrolase 	Epigenetic shift
+MYSM1	Peptidase	Cellular senescence, Inflammation, Stem cell exhaustion
+NEK7	Protein kinase 	Inflammation, Retrotranspositions
+NGF	Growth factor	Deregulated nutrient signaling
+NME7	Non-protein kinase	Stem cell exhaustion
+NOTCH1	Receptor	Altered intercellular communications
+OLA1	Hydrolase	Mitochondrial dysfunction
+PARP1	Glycosyltransferase	Cellular senescence, Genomic instability, Telomere attrition
+PELI1	Acyltransferase	Inflammation, Retrotranspositions
+PIP5K1A	Non-protein kinase	Deregulated nutrient signaling
+PJA2	Acyltransferase	Altered intercellular communications
+PLOD1	Oxidoreductase	Extracellular matrix stiffness
+PLOD3	Oxidoreductase	Extracellular matrix stiffness
+POLA1	Transferase 	Telomere attrition
+PPARA	Nuclear receptor	Impaired proteostasis, Stem cell exhaustion
+PPIL4	Isomerase	Altered intercellular communications
+PPM1A	Esterase	Altered intercellular communications, Inflammation
+PRKAG1	Protein kinase 	Impaired proteostasis, Mitochondrial dysfunction
+PSMD14	Peptidase	Impaired proteostasis, Mitochondrial dysfunction
+PTEN	Esterase	Cellular senescence, Deregulated nutrient signaling, Genomic instability
+PTK2	Tyrosine kinase	Cellular senescence, Genomic instability
+RAB13	Hydrolase 	Deregulated nutrient signaling, Impaired proteostasis, Mitochondrial dysfunction
+RAB14	Hydrolase 	Extracellular matrix stiffness
+RAB31	Hydrolase 	Impaired proteostasis, Mitochondrial dysfunction
+RAB32	Hydrolase 	Genomic instability, Mitochondrial dysfunction
+RAB33B	Hydrolase 	Impaired proteostasis, Mitochondrial dysfunction
+RAB4B	Hydrolase 	Deregulated nutrient signaling
+RAB5C	Hydrolase 	Altered intercellular communications, Stem cell exhaustion
+RAB7A	Hydrolase 	Mitochondrial dysfunction
+RAB7B	Hydrolase 	Impaired proteostasis, Inflammation, Mitochondrial dysfunction
+RAB8B	Hydrolase 	Altered intercellular communications, Impaired proteostasis, Mitochondrial dysfunction
+RAP2C	Hydrolase 	Extracellular matrix stiffness
+RHOA	Hydrolase 	Altered intercellular communications
+RHOT1	Hydrolase 	Mitochondrial dysfunction
+RHOT2	Hydrolase 	Mitochondrial dysfunction
+RHOU	Hydrolase 	Altered intercellular communications
+RNF125	Acyltransferase	Inflammation, Retrotranspositions
+RNF126	Acyltransferase	Genomic instability
+RNF14	Acyltransferase	Extracellular matrix stiffness, Mitochondrial dysfunction
+RNF5	Acyltransferase	Impaired proteostasis, Mitochondrial dysfunction
+ROCK1	AGC kinase	Cellular senescence, Genomic instability, Stem cell exhaustion
+RRAGD	Hydrolase 	Deregulated nutrient signaling
+SETD1B	Methyltransferase	Stem cell exhaustion
+SIRT1	Acyltransferase	Altered intercellular communications, Cellular senescence, Deregulated nutrient signaling, Epigenetic shift, Extracellular matrix stiffness, Genomic instability, Impaired proteostasis, Inflammation, Mitochondrial dysfunction, Retrotranspositions, Stem cell exhaustion, Telomere attrition
+SOD2	Oxidoreductase	Mitochondrial dysfunction
+SPP1	Cytokine	Extracellular matrix stiffness, Inflammation, Stem cell exhaustion
+SRC	Tyrosine kinase	Cellular senescence, Mitochondrial dysfunction
+TGFB1	Growth factor	Altered intercellular communications, Cellular senescence, Stem cell exhaustion
+TGFBR2	Receptor kinase	Cellular senescence
+TGS1	Methyltransferase	Telomere attrition
+TLR2	Receptor	Impaired proteostasis, Inflammation
+TLR4	Receptor	Inflammation, Mitochondrial dysfunction
+TNF	Tumour necrosis factor	Altered intercellular communications, Inflammation, Telomere attrition
+TNIK	Protein kinase	Altered intercellular communications, Cellular senescence, Deregulated nutrient signaling, Extracellular matrix stiffness, Genomic instability, Stem cell exhaustion
+TRAF6	Acyltransferase	Extracellular matrix stiffness
+UBE2E3	Acyltransferase	Cellular senescence, Impaired proteostasis, Stem cell exhaustion
+UBE2M	Acyltransferase	Altered intercellular communications, Impaired proteostasis
+UBE2O	Acyltransferase	Genomic instability, Impaired proteostasis
+UBE4A	Acyltransferase	Genomic instability, Impaired proteostasis
+UCHL5	Peptidase	Impaired proteostasis, Inflammation
+USP2	Peptidase	Altered intercellular communications, Impaired proteostasis, Mitochondrial dysfunction
+VDR	Nuclear receptor	Impaired proteostasis, Inflammation
+VEGFA	Growth factor	Deregulated nutrient signaling, Inflammation
+WWP1	Acyltransferase	Impaired proteostasis
