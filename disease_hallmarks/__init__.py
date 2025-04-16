@@ -5,7 +5,7 @@ This package provides tools for analyzing diseases through the lens of aging hal
 """
 
 from disease_hallmarks.analysis import DiseaseAnalyzer
-from disease_hallmarks.models import DiseaseAnnotation, HallmarkScores
+from disease_hallmarks.models import DiseaseAnnotation, HallmarkScore
 from disease_hallmarks.api_callers import GeneOntologyAPI, OpenTargetsAPI
 from disease_hallmarks.pathway_agent import PathwayAnalysisAgent
 from disease_hallmarks.cache import Cache
