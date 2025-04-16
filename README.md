@@ -11,7 +11,7 @@ A tool for analyzing diseases through the lens of aging hallmarks. This project 
 ### From GitHub
 
 ```bash
-git clone https://github.com/yourusername/disease_hallmarks.git
+git clone https://github.com/Insilico-org/disease_hallmarks.git
 cd disease_hallmarks
 pip install -e .
 ```
