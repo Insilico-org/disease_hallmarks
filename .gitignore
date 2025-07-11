@@ -6,6 +6,9 @@
 materials/cache/
 materials/query_cache/
 
+# Project
+examples/*
+
 # Python
 __pycache__/
 *.py[cod]
@@ -37,9 +40,6 @@ wheels/
 .vscode/
 *.swp
 *.swo
-
-# Web application
-disease_hallmarks_web/
 
 # Local data files
 *.db

@@ -1,10 +1,12 @@
 import os
 import json
 import hashlib
-from pathlib import Path
-from typing import Optional, Any, Union
-import requests
+import re
+import collections
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Optional, Dict, List, Union, Generator, Tuple
+import requests
 
 class Cache:
     """Simple file-based cache for API responses"""
@@ -21,9 +23,24 @@ class Cache:
             ttl: Time to live in seconds (default 24 hours), use INFINITE_TTL for no expiration
         """
         self.cache_dir = Path(cache_dir)
-        self.ttl = ttl
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-    
+        self.ttl = ttl
+
+    def _iter_cache_data(self) -> Generator[Tuple[Path, dict], None, None]:
+        """Generator that yields cache file paths and their loaded JSON data."""
+        for file_path in self.cache_dir.glob("*.json"):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                yield file_path, data
+            except (json.JSONDecodeError, OSError):
+                # In case of corrupted file, remove it and continue
+                try:
+                    file_path.unlink()
+                except OSError:
+                    pass
+                continue
+
     def _get_cache_path(self, key: str) -> Path:
         """Get path for cache file"""
         # Create hash of key for filename
@@ -31,618 +48,308 @@ class Cache:
         return self.cache_dir / f"{key_hash}.json"
     
     def get(self, key: str) -> Optional[Any]:
-        """Get value from cache if it exists and is not expired"""
-        # Create hash of key for lookup
-        key_hash = hashlib.md5(key.encode()).hexdigest()
-        
-        # Check in-memory cache first if available
-        if hasattr(self, '_memory_cache') and key_hash in self._memory_cache:
-            return self._memory_cache[key_hash]
-        
-        # Otherwise check file cache
+        """Get a value from the cache."""
         cache_path = self._get_cache_path(key)
-        
         if not cache_path.exists():
             return None
-            
+
         try:
-            with open(cache_path, 'r') as f:
+            with open(cache_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                
-            # Check if TTL is set to infinite
-            if self.ttl == Cache.INFINITE_TTL:
-                return data.get('value')
-                
-            # Check if cache is expired
-            timestamp = data.get('timestamp')
-            if timestamp:
-                cache_time = datetime.fromisoformat(timestamp)
-                if datetime.now() - cache_time < timedelta(seconds=self.ttl):
-                    return data.get('value')
+        except (json.JSONDecodeError, IOError):
+            # Corrupted file, treat as a cache miss and delete it
+            try:
+                cache_path.unlink()
+            except OSError:
+                pass # Ignore if deletion fails
+            return None
+
+        # Check if cache is expired
+        if self.ttl != self.INFINITE_TTL:
+            timestamp = data.get("timestamp")
+            if not timestamp:
+                # No timestamp, treat as expired
+                cache_path.unlink()
+                return None
             
-            return None
-        except Exception as e:
-            print(f"Error reading cache: {e}")
-            return None
-    
+            try:
+                if datetime.now() - datetime.fromisoformat(timestamp) >= timedelta(seconds=self.ttl):
+                    self.delete(key) # Use self.delete to handle file removal
+                    return None
+            except ValueError:
+                # Invalid timestamp format
+                cache_path.unlink()
+                return None
+
+        return data.get("value")
+
     def set(self, key: str, value: Any):
         """Save value to cache"""
         cache_path = self._get_cache_path(key)
-        
         data = {
             "timestamp": datetime.now().isoformat(),
             "value": value,
             "original_key": key  # Store the original key for debugging
         }
-        
         with open(cache_path, "w") as f:
             json.dump(data, f)
-    
-    def get_or_fetch(
-        self, 
-        url: str, 
-        method: str = "GET",
-        **kwargs
-    ) -> requests.Response:
-        """Get response from cache or make new request"""
-        # Create cache key from URL and request params
-        cache_key = f"{method}:{url}"
-        if "json" in kwargs:
-            cache_key += f":{json.dumps(kwargs['json'], sort_keys=True)}"
-        
-        # Try to get from cache
-        cached = self.get(cache_key)
-        if cached:
-            # Create mock response
-            response = requests.Response()
-            response._content = json.dumps(cached).encode()
-            response.status_code = 200
-            return response
-        
-        # Make actual request
-        response = requests.request(method, url, **kwargs)
-        response.raise_for_status()
-        
-        # Cache the response data
-        self.set(cache_key, response.json())
-        
-        return response
-        
+
+    def delete(self, key: str):
+        cache_path = self._get_cache_path(key)
+        if cache_path.exists():
+            cache_path.unlink()
+
+    def clear(self):
+        for item in self.cache_dir.iterdir():
+            if item.is_file():
+                item.unlink()
+
     def analyze_cache(self) -> dict:
-        """
-        Analyze the cache contents and return a dictionary with detailed information
-        
-        Returns:
-            Dictionary with cache analysis information
-        """
-        cache_path = self.cache_dir
-        if not cache_path.exists():
-            return {"error": f"Cache directory {cache_path} does not exist"}
-            
-        # Get all JSON files in cache directory
-        cache_files = list(cache_path.glob("*.json"))
-        if not cache_files:
-            return {"error": f"No cache files found in {cache_path}"}
-            
-        # Categorize cache files by API type
-        api_types = {
-            "ols_search": [],  # EBI Ontology Lookup Service
-            "opentargets": [],  # Open Targets API
-            "enrichr": [],     # Enrichr API
-            "pathway_analysis": [],  # GPT-4 pathway analysis
-            "other": []        # Other APIs
-        }
-        
-        # Track diseases that have been cached
+        api_types = collections.defaultdict(list)
         cached_diseases = set()
-        
-        # Analyze each cache file
-        for cache_file in cache_files:
-            try:
-                with open(cache_file) as f:
-                    data = json.load(f)
-                    
-                # Extract the original URL or key from the data if possible
-                value = data.get("value", {})
-                key = data.get("key", "")
-                
-                # Categorize based on content patterns and key patterns
-                if "pathway_analysis_" in cache_file.stem:
-                    # This is a GPT-4 pathway analysis call
-                    api_types["pathway_analysis"].append(cache_file)
-                elif isinstance(value, dict):
-                    if "response" in value and "docs" in value.get("response", {}):
-                        # This is an OLS API response
-                        api_types["ols_search"].append(cache_file)
-                        
-                        # Try to extract disease name
-                        docs = value.get("response", {}).get("docs", [])
-                        if docs:
-                            for doc in docs:
-                                if "label" in doc and doc.get("ontology_name") == "efo":
-                                    cached_diseases.add(doc.get("label"))
-                                    break
-                    
-                    elif "data" in value and "disease" in value.get("data", {}):
-                        # This is an Open Targets API response
-                        api_types["opentargets"].append(cache_file)
-                        
-                    elif any(key.startswith("KEGG_") or key.startswith("GO_") for key in value.keys()):
-                        # This is likely an Enrichr API response
-                        api_types["enrichr"].append(cache_file)
-                    
-                    else:
-                        # Other API
-                        api_types["other"].append(cache_file)
-                elif "enrichr_" in cache_file.stem:
-                    # This is an Enrichr API response based on the key
-                    api_types["enrichr"].append(cache_file)
-                else:
-                    api_types["other"].append(cache_file)
-                    
-            except (json.JSONDecodeError, KeyError, ValueError):
-                api_types["other"].append(cache_file)
-        
-        # Calculate total cache size
-        cache_size_mb = sum(f.stat().st_size for f in cache_files) / (1024 * 1024)
-        
-        # Get timestamp range
         timestamps = []
-        for cache_file in cache_files:
-            try:
-                with open(cache_file) as f:
-                    data = json.load(f)
-                    if "timestamp" in data:
-                        timestamps.append(data["timestamp"])
-            except:
-                pass
-                
+        total_size_bytes = 0
+        total_files = 0
+
+        for file_path, data in self._iter_cache_data():
+            total_files += 1
+            total_size_bytes += file_path.stat().st_size
+            if data.get("timestamp"):
+                timestamps.append(data["timestamp"])
+
+            file_type = self._get_cache_type_from_data(file_path, data)
+            api_types[file_type].append(file_path)
+
+            if file_type == 'ols':
+                value = data.get("value", {})
+                if isinstance(value, dict) and "response" in value:
+                    docs = value.get("response", {}).get("docs", [])
+                    for doc in docs:
+                        if "label" in doc and doc.get("ontology_name") == "efo":
+                            cached_diseases.add(doc.get("label"))
+                            break
+        
         timestamp_range = {}
         if timestamps:
             timestamps.sort()
-            timestamp_range = {
-                "oldest": timestamps[0],
-                "newest": timestamps[-1]
-            }
-            
-        # Return analysis results
+            timestamp_range = {"oldest": timestamps[0], "newest": timestamps[-1]}
+
         return {
-            "cache_dir": str(cache_path),
-            "total_items": len(cache_files),
-            "size_mb": cache_size_mb,
-            "api_breakdown": {
-                "ols_search": len(api_types["ols_search"]),
-                "opentargets": len(api_types["opentargets"]),
-                "enrichr": len(api_types["enrichr"]),
-                "pathway_analysis": len(api_types["pathway_analysis"]),
-                "other": len(api_types["other"])
-            },
+            "cache_dir": str(self.cache_dir),
+            "total_items": total_files,
+            "size_mb": total_size_bytes / (1024 * 1024),
+            "api_breakdown": {key: len(value) for key, value in api_types.items()},
             "cached_diseases": list(cached_diseases),
             "timestamp_range": timestamp_range
         }
-        
-    def print_analysis(self):
-        """Print a detailed analysis of the cache contents"""
-        analysis = self.analyze_cache()
-        
-        if "error" in analysis:
-            print(f"\n===== Cache Analysis =====")
-            print(f"Error: {analysis['error']}")
-            print("===========================\n")
-            return
-            
-        print(f"\n===== Cache Analysis =====")
-        print(f"Cache directory: {analysis['cache_dir']}")
-        print(f"Total cached items: {analysis['total_items']} ({analysis['size_mb']:.2f} MB)")
-        
-        print(f"\nAPI breakdown:")
-        print(f"- EBI Ontology Lookup Service: {analysis['api_breakdown']['ols_search']} items")
-        print(f"- Open Targets API: {analysis['api_breakdown']['opentargets']} items")
-        print(f"- Enrichr API: {analysis['api_breakdown']['enrichr']} items")
-        print(f"- GPT-4 Pathway Analysis: {analysis['api_breakdown']['pathway_analysis']} items")
-        print(f"- Other/Unknown: {analysis['api_breakdown']['other']} items")
-        
-        if analysis['cached_diseases']:
-            print(f"\nCached disease queries (up to 5):")
-            for disease in analysis['cached_diseases'][:5]:
-                print(f"- {disease}")
-            
-            if len(analysis['cached_diseases']) > 5:
-                print(f"- ...and {len(analysis['cached_diseases']) - 5} more")
-        
-        if analysis['timestamp_range']:
-            print(f"\nCache timestamp range:")
-            print(f"- Oldest: {analysis['timestamp_range']['oldest']}")
-            print(f"- Newest: {analysis['timestamp_range']['newest']}")
-        
-        # Show GPT-4 pathway analysis details if any exist
-        if analysis['api_breakdown']['pathway_analysis'] > 0:
-            print(f"\nGPT-4 Pathway Analysis:")
-            print(f"- {analysis['api_breakdown']['pathway_analysis']} cached pathway analyses")
-            print(f"- These are expensive API calls that have been cached for reuse")
-            print(f"- Each cached pathway analysis saves approximately $0.01-$0.03 in API costs")
-            estimated_savings = analysis['api_breakdown']['pathway_analysis'] * 0.02  # Average cost per call
-            print(f"- Estimated cost savings: ${estimated_savings:.2f}")
-            
-        print("===========================\n")
-        
-    def preload_cache(self) -> int:
-        """
-        Preload all cache files into memory for faster access
-        
-        This method scans all cache files and loads them into an in-memory dictionary
-        for faster access. This is useful when you know you'll be accessing many
-        cached items and want to avoid disk I/O.
-        
-        Returns:
-            int: Number of cache items loaded
-        """
-        cache_path = self.cache_dir
-        if not cache_path.exists():
-            return 0
-            
-        # Get all JSON files in cache directory
-        cache_files = list(cache_path.glob("*.json"))
-        if not cache_files:
-            return 0
-            
-        # In-memory cache dictionary
-        self._memory_cache = {}
-        loaded_count = 0
-        
-        # Load each cache file
-        for cache_file in cache_files:
-            try:
-                with open(cache_file) as f:
-                    data = json.load(f)
-                
-                # Extract key from filename
-                key_hash = cache_file.stem
-                
-                # Check if expired
-                if "timestamp" in data:
-                    if self.ttl == Cache.INFINITE_TTL:
-                        self._memory_cache[key_hash] = data["value"]
-                        loaded_count += 1
-                    else:
-                        cached_time = datetime.fromisoformat(data["timestamp"])
-                        if datetime.now() - cached_time < timedelta(seconds=self.ttl):
-                            self._memory_cache[key_hash] = data["value"]
-                            loaded_count += 1
-                    
-            except (json.JSONDecodeError, KeyError, ValueError):
-                continue
-                
-        return loaded_count
 
-    def list_cache_items(self, pattern: str = None) -> list[dict]:
-        """
-        List all cache items, optionally filtered by a pattern in the original key.
+    def get_key_prefixes(self, top_n: int = 30) -> dict:
+        prefixes = collections.Counter()
+        files_with_keys = 0
+        total_files = 0
+
+        for file_path, data in self._iter_cache_data():
+            total_files += 1
+            if 'original_key' in data:
+                files_with_keys += 1
+                key = data['original_key']
+                match = re.match(r'^([a-zA-Z:_\\-]+)', key)
+                if match:
+                    prefix = match.group(1).rstrip('_-:')
+                    prefixes[prefix] += 1
+
+        return {
+            "total_files_scanned": total_files,
+            "files_with_original_key": files_with_keys,
+            "top_prefixes": dict(prefixes.most_common(top_n))
+        }
+
+    def _is_disease_cached(self, disease_name: str) -> bool:
+        for _, data in self._iter_cache_data():
+            value = data.get("value", {})
+            if isinstance(value, dict) and "response" in value:
+                docs = value.get("response", {}).get("docs", [])
+                for doc in docs:
+                    if doc.get("label", "").lower() == disease_name.lower():
+                        return True
+        return False
+
+    def clear_disease_cache(self, disease_name: str) -> int:
+        cleared_count = 0
+        for file_path, data in self._iter_cache_data():
+            value = data.get("value", {})
+            if isinstance(value, dict) and "response" in value:
+                docs = value.get("response", {}).get("docs", [])
+                for doc in docs:
+                    if doc.get("label", "").lower() == disease_name.lower():
+                        file_path.unlink()
+                        cleared_count += 1
+                        break
+        return cleared_count
+
+    def _get_cache_type_from_data(self, file_path: Path, data: dict) -> str:
+        if 'original_key' in data:
+            key = data['original_key'].lower()
+            if key.startswith('ot_disease_targets_'): return 'opentargets'
+            if key.startswith('gpt4_') or key.startswith('pathway_analysis_'): return 'gpt4'
+            if key.startswith('enrichr_'): return 'enrichr'
+            if key.startswith('go_pathway_') or 'geneontology.org' in key: return 'go'
+            if key.startswith('quickgo_') or 'ebi.ac.uk/quickgo' in key: return 'go'
+            if key.startswith('ols_api_') or 'ebi.ac.uk/ols' in key: return 'ols'
+            if 'platform.opentargets.org' in key or 'opentargets' in key: return 'opentargets'
+
+        value = data.get('value', {})
+        value_str = str(value).lower()
         
-        Args:
-            pattern: Optional string pattern to filter keys
-            
-        Returns:
-            List of dicts with key, hash, timestamp, and is_expired information
-        """
+        if isinstance(value, dict):
+            if 'go:' in value_str or 'gene_ontology' in value_str or 'geneontology' in value_str: return 'go'
+            if 'ontology' in value_str or 'efo' in value_str: return 'ols'
+            if 'go_biological_process' in value_str or 'kegg' in value_str or 'enrichr' in value_str: return 'enrichr'
+            if ('target' in value_str or 'disease' in value_str) and 'opentargets' in value_str: return 'opentargets'
+
+        if isinstance(value, list) and value:
+            if any('hallmark' in str(item).lower() for item in value): return 'gpt4'
+            if all(isinstance(item, str) for item in value) and any('_' in item for item in value): return 'gpt4'
+
+        if file_path.stem.lower().startswith('pathway_analysis_'): return 'gpt4'
+
+        return 'other'
+
+    def list_cache_by_type(self, cache_type: str = None) -> list[dict]:
         results = []
-        
-        # Iterate through all files in the cache directory
-        for cache_file in self.cache_dir.glob("*.json"):
-            try:
-                with open(cache_file, 'r') as f:
-                    data = json.load(f)
-                
-                # Extract original key if available
-                original_key = data.get('original_key', 'unknown')
-                
-                # Skip if pattern is provided and doesn't match
-                if pattern and pattern not in original_key:
-                    continue
-                    
-                # Check if cache is expired
-                is_expired = False
-                if self.ttl != Cache.INFINITE_TTL:
-                    timestamp = data.get('timestamp')
-                    if timestamp:
-                        cache_time = datetime.fromisoformat(timestamp)
-                        if datetime.now() - cache_time >= timedelta(seconds=self.ttl):
-                            is_expired = True
-                
-                results.append({
-                    'key': original_key,
-                    'hash': cache_file.stem,
-                    'timestamp': data.get('timestamp', 'unknown'),
-                    'is_expired': is_expired
-                })
-                
-            except Exception as e:
-                # Skip files that can't be read
+        for file_path, data in self._iter_cache_data():
+            file_type = self._get_cache_type_from_data(file_path, data)
+            if cache_type is not None and file_type != cache_type:
                 continue
-                
-        return results
-    
-    def clear_expired(self) -> int:
-        """
-        Clear all expired cache items
-        
-        Returns:
-            Number of items cleared
-        """
-        cleared = 0
-        
-        # Skip if TTL is infinite
-        if self.ttl == Cache.INFINITE_TTL:
-            return 0
+
+            is_expired = False
+            timestamp = data.get('timestamp', 'unknown')
+            if self.ttl != self.INFINITE_TTL and timestamp != 'unknown':
+                cache_time = datetime.fromisoformat(timestamp)
+                if datetime.now() - cache_time >= timedelta(seconds=self.ttl):
+                    is_expired = True
             
-        # Iterate through all files in the cache directory
-        for cache_file in self.cache_dir.glob("*.json"):
-            try:
-                with open(cache_file, 'r') as f:
-                    data = json.load(f)
-                
-                # Check if cache is expired
-                timestamp = data.get('timestamp')
-                if timestamp:
-                    cache_time = datetime.fromisoformat(timestamp)
-                    if datetime.now() - cache_time >= timedelta(seconds=self.ttl):
-                        # Remove expired file
-                        cache_file.unlink()
-                        cleared += 1
-                        
-            except Exception as e:
-                # Skip files that can't be read
-                continue
-                
+            results.append({
+                'path': file_path,
+                'type': file_type,
+                'size': file_path.stat().st_size,
+                'timestamp': timestamp,
+                'is_expired': is_expired,
+                'original_key': data.get('original_key', 'unknown')
+            })
+        return results
+
+    def clear_cache_by_type(self, cache_type: str) -> int:
+        cleared = 0
+        for file_path, data in self._iter_cache_data():
+            if self._get_cache_type_from_data(file_path, data) == cache_type:
+                try:
+                    file_path.unlink()
+                    cleared += 1
+                except OSError:
+                    continue
         return cleared
 
-    def get_cache_type(self, file_path: Path) -> str:
-        """
-        Determine the type of API a cache file is associated with.
-        
-        Args:
-            file_path: Path to the cache file
-            
-        Returns:
-            String indicating the API type: 'enrichr', 'ols', 'opentargets', 
-            'gpt4', 'go', 'quickgo', 'disease', or 'other'
-        """
-        try:
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-                
-            # Check if we have the original key
-            if 'original_key' in data:
-                key = data['original_key'].lower()
-                if 'enrichr' in key:
-                    return 'enrichr'
-                elif 'ols_api' in key or 'ebi.ac.uk/ols' in key:
-                    return 'ols'
-                elif 'opentargets' in key or 'platform.opentargets.org' in key:
-                    return 'opentargets'
-                elif 'pathway_analysis' in key or 'gpt-4' in key or 'gpt4' in key:
-                    return 'gpt4'
-                elif 'go_pathway' in key or 'geneontology.org' in key:
-                    return 'go'
-                elif 'quickgo' in key or 'ebi.ac.uk/quickgo' in key:
-                    return 'go'
-                
-            # If no original key or no match, try to infer from the value
-            value = data.get('value', {})
-            value_str = str(value).lower()
-            
-            # Check if it's an Enrichr response
-            if isinstance(value, dict) and ('go_biological_process' in value_str or 
-                                           'kegg' in value_str or 
-                                           'enrichr' in value_str):
-                return 'enrichr'
-                
-            # Check if it's an OpenTargets response
-            if isinstance(value, dict) and ('target' in value_str or 'disease' in value_str) and 'opentargets' in value_str:
-                return 'opentargets'
-                
-            # Check if it's an OLS response
-            if isinstance(value, dict) and ('ontology' in value_str or 'efo' in value_str):
-                return 'ols'
-                
-            # Check if it's a Gene Ontology or QuickGO response
-            if isinstance(value, dict) and ('go:' in value_str.lower() or 'gene_ontology' in value_str.lower() or 
-                                           'quickgo' in value_str.lower() or 'geneontology' in value_str.lower()):
-                return 'go'
-                
-            # Check if it's a GPT-4 response for pathway analysis
-            if isinstance(value, list) and any('hallmark' in str(item).lower() for item in value):
-                return 'gpt4'
-            
-            # Additional check for GPT-4 pathway analysis
-            if file_path.stem.lower().startswith('pathway_analysis_'):
-                return 'gpt4'
-            
-            return 'other'
-            
-        except Exception as e:
-            return 'error'
+    def clear_expired(self) -> int:
+        if self.ttl == self.INFINITE_TTL:
+            return 0
+        cleared = 0
+        for file_path, data in self._iter_cache_data():
+            timestamp = data.get('timestamp')
+            if timestamp:
+                try:
+                    cache_time = datetime.fromisoformat(timestamp)
+                    if datetime.now() - cache_time >= timedelta(seconds=self.ttl):
+                        file_path.unlink()
+                        cleared += 1
+                except (ValueError, OSError):
+                    continue
+        return cleared
+
+
     
-    def is_related_to_disease(self, file_path: Path, disease_name: str) -> bool:
-        """
-        Determine if a cache file is related to a specific disease.
+    def _is_related_to_disease(self, data: dict, disease_name: str) -> bool:
+        """Check if a cache entry is related to a specific disease."""
+        disease_name_lower = disease_name.lower()
         
-        Args:
-            file_path: Path to the cache file
-            disease_name: Name of the disease to check for
+        # Check original_key
+        original_key = data.get('original_key', '').lower()
+        if disease_name_lower in original_key:
+            return True
             
-        Returns:
-            True if the cache file is related to the disease, False otherwise
-        """
-        disease_lower = disease_name.lower()
+        # Check for OLS EFO responses, where the disease name might be in the value
+        value = data.get('value', {})
+        if isinstance(value, dict):
+            response = value.get('response', {})
+            if isinstance(response, dict):
+                docs = response.get('docs', [])
+                for doc in docs:
+                    if disease_name_lower in doc.get('label', '').lower():
+                        return True
         
-        try:
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-                
-            # Check if we have the original key
-            if 'original_key' in data and disease_lower in data['original_key'].lower():
-                return True
-                    
-            # If no original key, try to infer from the value
-            value = data.get('value', {})
-            value_str = str(value).lower()
-            
-            # Check if the disease name appears in the value
-            if disease_lower in value_str:
-                return True
-                
-            return False
-            
-        except Exception as e:
-            return False
-    
+        return False
+
     def list_cache_by_type(self, cache_type: str = None) -> list[dict]:
-        """
-        List all cache items of a specific type.
-        
-        Args:
-            cache_type: Type of cache to list ('enrichr', 'ols', 'opentargets', 'gpt4', 'go', 'quickgo', 'other')
-                        If None, list all cache items
-            
-        Returns:
-            List of dicts with path, type, size, timestamp, and is_expired information
-        """
+        """List all cache items of a specific type."""
         results = []
-        
-        # Iterate through all files in the cache directory
-        for cache_file in self.cache_dir.glob("*.json"):
-            try:
-                # If a specific type is requested, check if this file matches
-                if cache_type is not None:
-                    file_type = self.get_cache_type(cache_file)
-                    if file_type != cache_type:
-                        continue
-                
-                with open(cache_file, 'r') as f:
-                    data = json.load(f)
-                
-                # Check if cache is expired
-                is_expired = False
-                timestamp = data.get('timestamp', 'unknown')
-                
-                if self.ttl != Cache.INFINITE_TTL and timestamp != 'unknown':
+        for file_path, data in self._iter_cache_data():
+            file_type = self._get_cache_type_from_data(file_path, data)
+            if cache_type is not None and file_type != cache_type:
+                continue
+
+            is_expired = False
+            timestamp = data.get('timestamp', 'unknown')
+            if self.ttl != self.INFINITE_TTL and timestamp != 'unknown':
+                try:
                     cache_time = datetime.fromisoformat(timestamp)
                     if datetime.now() - cache_time >= timedelta(seconds=self.ttl):
                         is_expired = True
-                
-                # Get file size
-                size_bytes = cache_file.stat().st_size
+                except ValueError:
+                    is_expired = True # Treat invalid timestamps as expired
+            
+            results.append({
+                'path': file_path,
+                'type': file_type,
+                'size': file_path.stat().st_size,
+                'timestamp': timestamp,
+                'is_expired': is_expired,
+                'original_key': data.get('original_key', 'unknown')
+            })
+        return results
+
+    def list_disease_cache(self, disease_name: str) -> list[dict]:
+        """List all cache items related to a specific disease."""
+        results = []
+        for file_path, data in self._iter_cache_data():
+            if self._is_related_to_disease(data, disease_name):
+                is_expired = False
+                timestamp = data.get('timestamp', 'unknown')
+                if self.ttl != self.INFINITE_TTL and timestamp != 'unknown':
+                    try:
+                        cache_time = datetime.fromisoformat(timestamp)
+                        if datetime.now() - cache_time >= timedelta(seconds=self.ttl):
+                            is_expired = True
+                    except ValueError:
+                        is_expired = True
                 
                 results.append({
-                    'path': cache_file,
-                    'type': self.get_cache_type(cache_file),
-                    'size': size_bytes,
+                    'path': file_path,
+                    'type': self._get_cache_type_from_data(file_path, data),
+                    'size': file_path.stat().st_size,
                     'timestamp': timestamp,
                     'is_expired': is_expired,
                     'original_key': data.get('original_key', 'unknown')
                 })
-                
-            except Exception as e:
-                # Skip files that can't be read
-                continue
-                
         return results
-    
-    def list_disease_cache(self, disease_name: str) -> list[dict]:
-        """
-        List all cache items related to a specific disease.
-        
-        Args:
-            disease_name: Name of the disease to find cache entries for
-            
-        Returns:
-            List of dicts with path, type, size, timestamp, and is_expired information
-        """
-        results = []
-        
-        # Iterate through all files in the cache directory
-        for cache_file in self.cache_dir.glob("*.json"):
-            if self.is_related_to_disease(cache_file, disease_name):
-                try:
-                    with open(cache_file, 'r') as f:
-                        data = json.load(f)
-                    
-                    # Check if cache is expired
-                    is_expired = False
-                    timestamp = data.get('timestamp', 'unknown')
-                    
-                    if self.ttl != Cache.INFINITE_TTL and timestamp != 'unknown':
-                        cache_time = datetime.fromisoformat(timestamp)
-                        if datetime.now() - cache_time >= timedelta(seconds=self.ttl):
-                            is_expired = True
-                    
-                    # Get file size
-                    size_bytes = cache_file.stat().st_size
-                    
-                    results.append({
-                        'path': cache_file,
-                        'type': self.get_cache_type(cache_file),
-                        'size': size_bytes,
-                        'timestamp': timestamp,
-                        'is_expired': is_expired,
-                        'original_key': data.get('original_key', 'unknown')
-                    })
-                    
-                except Exception as e:
-                    # Skip files that can't be read
-                    continue
-                    
-        return results
-    
-    def clear_cache_by_type(self, cache_type: str) -> int:
-        """
-        Clear all cache items of a specific type.
-        
-        Args:
-            cache_type: Type of cache to clear ('enrichr', 'ols', 'opentargets', 'gpt4', 'go', 'quickgo', 'other')
-            
-        Returns:
-            Number of items cleared
-        """
-        cleared = 0
-        
-        # Get all cache files of the specified type
-        cache_items = self.list_cache_by_type(cache_type)
-        
-        # Delete each file
-        for item in cache_items:
-            try:
-                item['path'].unlink()
-                cleared += 1
-            except Exception as e:
-                # Skip files that can't be deleted
-                continue
-                
-        return cleared
-    
+
     def clear_disease_cache(self, disease_name: str) -> int:
-        """
-        Clear all cache items related to a specific disease.
-        
-        Args:
-            disease_name: Name of the disease to clear cache for
-            
-        Returns:
-            Number of items cleared
-        """
+        """Clear all cache items related to a specific disease."""
         cleared = 0
-        
-        # Get all cache files related to the disease
-        cache_items = self.list_disease_cache(disease_name)
-        
-        # Delete each file
-        for item in cache_items:
-            try:
-                item['path'].unlink()
-                cleared += 1
-            except Exception as e:
-                # Skip files that can't be deleted
-                continue
-                
+        for file_path, data in self._iter_cache_data():
+            if self._is_related_to_disease(data, disease_name):
+                try:
+                    file_path.unlink()
+                    cleared += 1
+                except OSError:
+                    continue
         return cleared

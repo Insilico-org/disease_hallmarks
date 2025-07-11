@@ -354,7 +354,7 @@ class EnrichrAnalysis:
                               p_value_threshold: float = 0.05,
                               min_overlap: int = 2) -> List[Dict[str, Any]]:
         """Extract significant enriched terms"""
-        if not self.results:
+        if not self.results or isinstance(self.results, Exception):
             return []
 
         significant = []
@@ -1235,40 +1235,51 @@ class OpenTargetsAPI:
             
         raise Exception(f"Error getting disease associations for target: {target_id}")
 
-    def get_disease_targets(self, efo_id: str, max_targets: int = 200, score_threshold: float = 0.0) -> list[str]:
+    def get_disease_targets(self, efo_id: str, max_targets: int = 100, score_threshold: float = 0.0, debug: bool = False) -> list[str]:
         """
         Get target genes associated with a disease
         
         Args:
             efo_id: EFO ID of the disease
-            max_targets: Maximum number of targets to retrieve (default: 200)
+            max_targets: Maximum number of targets to retrieve (default: 100).
+                         If <= 0, all targets meeting the score_threshold will be retrieved.
             score_threshold: Minimum association score to include a target (0.0-1.0, default: 0.0)
             
         Returns:
             List of gene symbols associated with the disease
         """
-        # Create a standardized cache key - use a consistent format to avoid duplicates
-        # Always use the same max_targets value in the cache key to prevent duplicate caching
-        # The actual max_targets parameter will still be respected in the result
+        # Create a standardized cache key. This key represents all targets for the disease and score threshold.
         cache_key = f"ot_disease_targets_{efo_id}_score{score_threshold}"
         
-        # Check cache first if available
         if self.cache:
             cached_result = self.cache.get(cache_key)
             if cached_result:
-                # Apply the max_targets limit to the cached result
-                return cached_result[:max_targets]
-        
-        all_targets = []
-        page_size = 100  # Fetch 100 targets per request
+                if debug:
+                    print(f"DEBUG: Cache hit for {cache_key}. Found {len(cached_result)} targets in cache.")
+                if max_targets > 0:
+                    return cached_result[:max_targets]
+                else: # max_targets <= 0 means return all from cache
+                    return cached_result
+        if debug:
+            print(f"DEBUG: Cache miss for {cache_key}")
+
+        all_targets_collected = []
+        page_size = 1000  # OpenTargets allows up to 1000 per page for associatedTargets
         current_page = 0
-        
-        while len(all_targets) < max_targets:
+        continue_fetching_from_api = True
+
+        if debug:
+            print(f"DEBUG: Starting API fetch for efo_id={efo_id}, max_targets_param={max_targets}, score_threshold={score_threshold}")
+
+        while continue_fetching_from_api:
+            # This loop will now fetch ALL targets from the API for the given efo_id and score_threshold.
+            # The max_targets parameter is applied only when returning the final result, ensuring the cache is complete.
+
             query = """
             query diseaseAssociations($efoId: String!, $index: Int!, $size: Int!) {
               disease(efoId: $efoId) {
                 associatedTargets(page: { index: $index, size: $size }) {
-                  count
+                  count # Total targets for this disease in OpenTargets (before our score filtering)
                   rows {
                     target {
                       approvedSymbol
@@ -1281,60 +1292,108 @@ class OpenTargetsAPI:
             """
             url = f"{self.BASE_URL}/graphql"
             
-            for _ in range(self.max_retries):
+            api_call_succeeded_for_page = False
+            for attempt in range(self.max_retries):
+                if debug:
+                    print(f"DEBUG: Attempt {attempt + 1}/{self.max_retries} for page {current_page}, size {page_size}")
                 try:
                     response = requests.post(
                         url, 
-                        json={"query": query, "variables": {"efoId": efo_id, "index": current_page, "size": page_size}}
+                        json={"query": query, "variables": {"efoId": efo_id, "index": current_page, "size": page_size}},
+                        timeout=30 # Added timeout
                     )
                     
                     if response.ok:
                         data = response.json()
+                        api_call_succeeded_for_page = True
                         
                         try:
-                            rows = data["data"]["disease"]["associatedTargets"]["rows"]
-                            total_count = data["data"]["disease"]["associatedTargets"]["count"]
+                            associated_targets_data = data.get("data", {}).get("disease", {}).get("associatedTargets")
+                            if not associated_targets_data:
+                                if debug:
+                                    print(f"DEBUG: 'associatedTargets' field missing or null in API response for page {current_page}. Assuming end of data or malformed response.")
+                                continue_fetching_from_api = False
+                                break # Break retry loop
+
+                            rows = associated_targets_data.get("rows", [])
+                            # total_api_count = associated_targets_data.get("count", 0) # Unfiltered total from API
+
+                            if debug:
+                                print(f"DEBUG: Page {current_page}, API returned {len(rows)} rows.")
                             
-                            # Extract target symbols and scores from the current page
-                            # Filter by score threshold
+                            if not rows:
+                                if debug:
+                                    print(f"DEBUG: API returned no rows for page {current_page}. Assuming end of data.")
+                                continue_fetching_from_api = False
+                                break # Break retry loop
+
+                            targets_on_this_page_meeting_threshold = []
                             for row in rows:
-                                symbol = row["target"]["approvedSymbol"]
-                                score = row["score"]
-                                
-                                if score >= score_threshold:
-                                    all_targets.append(symbol)
+                                target_info = row.get("target")
+                                score = row.get("score")
+                                if target_info and target_info.get("approvedSymbol") is not None and score is not None:
+                                    if score >= score_threshold:
+                                        targets_on_this_page_meeting_threshold.append(target_info["approvedSymbol"])
                             
-                            # If we got fewer targets than requested or reached the total count, we're done
-                            if len(rows) < page_size or len(all_targets) >= total_count:
-                                break
-                                
-                            # Move to the next page
+                            all_targets_collected.extend(targets_on_this_page_meeting_threshold)
+                            if debug:
+                                print(f"DEBUG: Added {len(targets_on_this_page_meeting_threshold)} targets from page {current_page} meeting threshold. Total collected: {len(all_targets_collected)}.")
+
+                            if len(rows) < page_size:
+                                if debug:
+                                    print(f"DEBUG: API returned {len(rows)} rows, less than page_size {page_size}. Assuming end of data.")
+                                continue_fetching_from_api = False
+                                break # Break retry loop
+                            
                             current_page += 1
-                            
-                            # Continue to the next page
-                            break
-                        except (KeyError, TypeError):
-                            # No more data available
-                            break
-                    
-                    if response.status_code != 503:
-                        break
+                            if debug:
+                                print(f"DEBUG: Successfully processed page, moving to next page index: {current_page}.")
+                            break # Break retry loop (proceed to next page in outer while)
                         
-                except requests.RequestException:
-                    pass
+                        except (KeyError, TypeError, AttributeError) as e:
+                            if debug:
+                                print(f"DEBUG: Error processing data from API response: {e}. Response text: {response.text[:500]}")
+                            continue_fetching_from_api = False # Stop due to unexpected data structure
+                            break # Break retry loop
                     
-                sleep(self.retry_delay)
-            else:
-                # All retries failed
-                break
-        
-        result = all_targets[:max_targets]  # Limit to max_targets
-        
-        # Cache the result if cache is available
-        if self.cache:
-            self.cache.set(cache_key, result)
+                    elif response.status_code == 503: # Service unavailable
+                        if debug:
+                            print(f"DEBUG: API returned 503 (Service Unavailable) on attempt {attempt + 1}. Retrying after {self.retry_delay}s...")
+                        sleep(self.retry_delay)
+                        # continue to next attempt in retry loop
+                    else:
+                        if debug:
+                            print(f"DEBUG: API request failed. Status: {response.status_code}, Response: {response.text[:500]}. Stopping.")
+                        continue_fetching_from_api = False # Non-retryable HTTP error
+                        break # Break retry loop
+                        
+                except requests.RequestException as e:
+                    if debug:
+                        print(f"DEBUG: RequestException on attempt {attempt + 1}: {e}. Retrying after {self.retry_delay}s...")
+                    if attempt < self.max_retries - 1:
+                        sleep(self.retry_delay)
+                    # continue to next attempt in retry loop
             
-        return result
+            if not api_call_succeeded_for_page and continue_fetching_from_api:
+                # This means all retries for the current page failed (e.g. due to repeated RequestException or 503s)
+                if debug:
+                    print(f"DEBUG: All {self.max_retries} retries failed for page {current_page}. Stopping API calls.")
+                continue_fetching_from_api = False # Stop fetching further pages
+        
+        if self.cache:
+            if debug:
+                print(f"DEBUG: Caching {len(all_targets_collected)} targets for key {cache_key}.")
+            self.cache.set(cache_key, all_targets_collected) # Cache all collected targets that met threshold
+            
+        final_result = []
+        if max_targets > 0:
+            final_result = all_targets_collected[:max_targets]
+        else: # max_targets <= 0 implies get all collected targets
+            final_result = all_targets_collected
+        
+        if debug:
+            print(f"DEBUG: Returning {len(final_result)} targets. (Original max_targets_param was {max_targets}).")
+        return final_result
 
 
 def main():

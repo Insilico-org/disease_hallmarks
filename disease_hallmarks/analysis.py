@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 import pandas as pd
+import requests
+import json
 import math
 from dotenv import load_dotenv
 from pathlib import Path
@@ -21,7 +23,7 @@ from .pathway_normalizer import PathwayNormalizer
 class DiseaseAnalyzer:
     """Main class for disease analysis through aging hallmarks"""
     
-    def __init__(self, cache_dir: str | None = None):
+    def __init__(self, cache_dir: str | None = None, score_threshold: float = 0.35, max_targets: int = 50):
         # Load environment variables
         load_dotenv()
         
@@ -41,6 +43,10 @@ class DiseaseAnalyzer:
             
         # Initialize cache with TTL
         self.cache = Cache(self.cache_dir, ttl=cache_ttl)
+
+        # Store analysis parameters
+        self.score_threshold = score_threshold
+        self.max_targets = max_targets
         
         self._load_reference_data()
         self.db = DiseaseDB()
@@ -58,12 +64,21 @@ class DiseaseAnalyzer:
     def _check_and_load_cache(self):
         """Check if cache directory has content and load it"""
         # Analyze cache contents
-        self.cache.print_analysis()
-        
-        # Preload cache into memory for faster access
-        loaded_items = self.cache.preload_cache()
-        if loaded_items > 0:
-            print(f"Preloaded {loaded_items} cache items into memory for faster access")
+        analysis_data = self.cache.analyze_cache()
+        print("\n===== Cache Analysis (from DiseaseAnalyzer) =====")
+        if 'error' in analysis_data:
+            print(f"Error during cache analysis: {analysis_data['error']}")
+        else:
+            print(f"Cache directory: {analysis_data.get('cache_dir', 'N/A')}")
+            print(f"Total items: {analysis_data.get('total_items', 0)}")
+            print(f"Total size: {analysis_data.get('size_mb', 0):.2f} MB")
+            api_breakdown = analysis_data.get('api_breakdown', {})
+            if api_breakdown:
+                print("API Call Breakdown:")
+                for api, count in sorted(api_breakdown.items()):
+                    if count > 0: print(f"  - {api}: {count}")
+        print("===================================================\n")
+        # Preloading is no longer necessary, cache items are loaded on demand.
         
     def _load_reference_data(self):
         """Load hallmark genes and longevity data from modules and files"""
@@ -90,8 +105,16 @@ class DiseaseAnalyzer:
     def _get_efo_id(self, disease_name: str) -> str | None:
         """Get EFO ID for disease name using OLS API"""
         url = f"https://www.ebi.ac.uk/ols/api/search?q={disease_name}&ontology=efo"
-        response = self.cache.get_or_fetch(url)
-        data = response.json()
+        data = self.cache.get(url)
+        if data is None:
+            try:
+                response = requests.get(url)
+                response.raise_for_status()  # Raise an exception for bad status codes
+                data = response.json()
+                self.cache.set(url, data)
+            except requests.exceptions.RequestException as e:
+                print(f"Error fetching EFO ID for {disease_name}: {e}")
+                return None
         
         if not data["response"]["docs"]:
             return None
@@ -102,14 +125,12 @@ class DiseaseAnalyzer:
                 return doc["short_form"]
         return None
     
-    @lru_cache(maxsize=1000)
-    def _get_disease_targets(self, efo_id: str, score_threshold: float = 0.2) -> list[str]:
+    def _get_disease_targets(self, efo_id: str) -> list[str]:
         """
-        Get target genes for disease from OpenTargets
+        Get target genes for disease from OpenTargets using instance-defined thresholds.
         
         Args:
             efo_id: EFO ID of the disease
-            score_threshold: Minimum association score to include a target (0.0-1.0)
             
         Returns:
             List of gene symbols associated with the disease
@@ -120,8 +141,10 @@ class DiseaseAnalyzer:
             self.ot_api = OpenTargetsAPI(cache=self.cache)
             
         # Use the API to get disease targets
-        # Note: The max_targets parameter is applied after retrieving from cache
-        return self.ot_api.get_disease_targets(efo_id, max_targets=25, score_threshold=score_threshold)
+        # Note: The self.max_targets parameter is applied after retrieving from cache by OpenTargetsAPI
+        return self.ot_api.get_disease_targets(efo_id, 
+                                               max_targets=self.max_targets, 
+                                               score_threshold=self.score_threshold)
     
     def _calculate_hallmark_scores(
         self, 
@@ -336,18 +359,16 @@ class DiseaseAnalyzer:
         return {term['term']: float(term['p_value']) for term in terms}
     
     def analyze_disease(
-        self, 
-        disease_name: str, 
-        verbose: bool = False,
-        score_threshold: float = 0.0
-    ) -> Optional[DiseaseAnnotation]:
+    self, 
+    disease_name: str, 
+    verbose: bool = False
+) -> Optional[DiseaseAnnotation]:
         """
         Analyze a disease and calculate its aging hallmark scores
         
         Args:
             disease_name: Name of the disease to analyze
             verbose: Whether to print verbose output
-            score_threshold: Minimum association score to include a target (0.0-1.0)
             
         Returns:
             DiseaseAnnotation object with results, or None if disease not found
@@ -364,7 +385,7 @@ class DiseaseAnalyzer:
             print(f"Found disease: {disease_name} (EFO ID: {efo_id})")
             
         # Get target genes for the disease
-        target_genes = self._get_disease_targets(efo_id, score_threshold=score_threshold)
+        target_genes = self._get_disease_targets(efo_id)
         
         if not target_genes:
             if verbose:
@@ -387,17 +408,28 @@ class DiseaseAnalyzer:
                 }
                 """
                 url = "https://api.platform.opentargets.org/api/v4/graphql"
-                try:
-                    response = self.cache.get_or_fetch(
-                        url, 
-                        method="POST",
-                        json={"query": query, "variables": {"efoId": efo_id}}
-                    )
-                    data = response.json()
-                    total_count = data["data"]["disease"]["associatedTargets"]["count"]
-                    print(f"Total available targets in OpenTargets: {total_count}")
-                except Exception:
-                    pass
+                cache_payload_dict = {"query": query, "variables": {"efoId": efo_id}}
+                cache_key = f"{url}::POST::{json.dumps(cache_payload_dict, sort_keys=True)}"
+                
+                data = self.cache.get(cache_key)
+                
+                if data is None:
+                    try:
+                        api_response = requests.post(url, json=cache_payload_dict)
+                        api_response.raise_for_status()  # Raise an exception for bad status codes
+                        data = api_response.json()
+                        self.cache.set(cache_key, data)
+                    except requests.exceptions.RequestException as e:
+                        # print(f"Failed to fetch OpenTargets count for {efo_id}: {e}") # Optional for debugging
+                        pass # Mimic original behavior of passing on exception
+                
+                if data:
+                    try:
+                        total_count = data["data"]["disease"]["associatedTargets"]["count"]
+                        print(f"Total available targets in OpenTargets: {total_count}")
+                    except (KeyError, TypeError) as e:
+                        # print(f"Could not parse total_count from OpenTargets response: {e}") # Optional for debugging
+                        pass # If data structure is not as expected
         
         # Get pathway enrichment
         enriched_pathways = self._analyze_pathways(target_genes, debug=verbose)
@@ -463,22 +495,23 @@ class DiseaseAnalyzer:
         evenness_factor = normalized_entropy
         
         # Calculate strength factor (reward higher average scores)
-        strength_factor = mean_score
+        # strength_factor = mean_score
         
         # Combine factors into representativeness score
         # This formula balances breadth, evenness, and strength
-        representativeness = strength_factor * (1 + breadth_factor) * (1 + evenness_factor)
+        # representativeness = strength_factor * (1 + breadth_factor) * (1 + evenness_factor)
+        representativeness = (1 + breadth_factor) * (1 + evenness_factor)
         
         # Calculate final aging score
         # Base on average score but boost by representativeness
         total_score = mean_score * (1 + representativeness)
         
         # Add a small bonus for longevity gene overlap
-        longevity_factor = len(longevity_overlap) / 20  # Normalize to ~0.5 for 10 genes
-        longevity_factor = min(longevity_factor, 1.0)  # Cap at 1.0
+        # longevity_factor = len(longevity_overlap) / 20  # Normalize to ~0.5 for 10 genes
+        # longevity_factor = min(longevity_factor, 1.0)  # Cap at 1.0
         
         # Apply longevity bonus
-        total_score *= (1 + (longevity_factor * 0.2))  # Max 20% boost for longevity genes
+        # total_score *= (1 + (longevity_factor * 0.2))  # Max 20% boost for longevity genes
         
         if verbose:
             print(f"\n=== Total Aging Score Analysis ===")
@@ -487,9 +520,9 @@ class DiseaseAnalyzer:
             print(f"Normalized entropy: {normalized_entropy:.4f}")
             print(f"Breadth factor: {breadth_factor:.4f}")
             print(f"Evenness factor: {evenness_factor:.4f}")
-            print(f"Strength factor: {strength_factor:.4f}")
+            # print(f"Strength factor: {strength_factor:.4f}")
             print(f"Representativeness: {representativeness:.4f}")
-            print(f"Longevity gene bonus: {longevity_factor * 0.2:.4f}")
+            # print(f"Longevity gene bonus: {longevity_factor * 0.2:.4f}")
             print(f"Total aging score: {total_score:.4f}")
         
         # Create annotation with additional metrics
@@ -498,7 +531,7 @@ class DiseaseAnalyzer:
             efo_id=efo_id,
             target_genes=target_genes,
             hallmark_scores=hallmark_scores,
-            longevity_genes=longevity_overlap,
+            # longevity_genes=longevity_overlap,
             enriched_pathways=enriched_pathways,
             total_aging_score=total_score
         )
