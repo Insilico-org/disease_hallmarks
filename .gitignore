@@ -8,6 +8,7 @@ materials/query_cache/
 
 # Project
 examples/*
+TRASH/*
 
 # Python
 __pycache__/
